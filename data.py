@@ -69,7 +69,7 @@ def batchify(data, vocab):
     truth = ListsToTensor(truth, vocab)
     inp = ListsToTensor(inp, vocab)
     seg = ListsToTensor(seg)
-    msk = ListsToTensor(msk).to(torch.uint8)
+    msk = ListsToTensor(msk).to(torch.bool)
     nxt_snt_flag = torch.ByteTensor(nxt_snt_flag)
     return truth, inp, seg, msk, nxt_snt_flag
 
