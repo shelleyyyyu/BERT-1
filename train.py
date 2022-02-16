@@ -8,6 +8,8 @@ import torch.multiprocessing as mp
 from bert import BERTLM
 from data import Vocab, DataLoader, CLS, SEP, MASK
 from adam import AdamWeightDecayOptimizer
+import warnings
+warnings.filterwarnings('ignore')
 
 import argparse, os
 import random
@@ -58,15 +60,21 @@ def average_gradients(model):
 def run(args, local_rank):
     """ Distributed Synchronous """
     torch.manual_seed(1234)
-    vocab = Vocab(args.vocab, min_occur_cnt=args.min_occur_cnt, specials=[CLS, SEP, MASK])
-    if (args.world_size==1 or dist.get_rank() ==0):
-        print (vocab.size)
-    model = BERTLM(local_rank, vocab, args.embed_dim, args.ff_embed_dim, args.num_heads, args.dropout, args.layers, args.approx)
+
     if args.start_from is not None:
-        ckpt = torch.load(args.start_from, map_location='cpu')
-        model.load_state_dict(ckpt['model'])
-    model = model.cuda(local_rank)
-    
+        bert_ckpt = torch.load(args.start_from)
+        bert_args = bert_ckpt['args']
+        bert_vocab = Vocab(args.vocab, min_occur_cnt=bert_args.min_occur_cnt, specials=[CLS, SEP, MASK])
+        model = BERTLM(local_rank, bert_vocab, bert_args.embed_dim, bert_args.ff_embed_dim, bert_args.num_heads, \
+                            bert_args.dropout, bert_args.layers, bert_args.approx)
+        model.load_state_dict(bert_ckpt['model'])
+    else:
+        vocab = Vocab(args.vocab, min_occur_cnt=args.min_occur_cnt, specials=[CLS, SEP, MASK])
+        model = BERTLM(local_rank, vocab, args.embed_dim, args.ff_embed_dim, args.num_heads, args.dropout, args.layers, args.approx)
+
+    if torch.cuda.is_available():
+        model = model.cuda(local_rank)
+
     weight_decay_params = []
     no_weight_decay_params = []
     
@@ -98,10 +106,11 @@ def run(args, local_rank):
     else:
         optimizer = AdamWeightDecayOptimizer(grouped_params,
                            lr=1e-4, betas=(0.9, 0.999), eps=1e-6)
-    if args.start_from is not None:
-        optimizer.load_state_dict(ckpt['optimizer'])
 
-    train_data = DataLoader(vocab, args.train_data, args.batch_size, args.max_len)
+    if args.start_from is not None and 'optimizer' in dict(bert_ckpt).keys():
+        optimizer.load_state_dict(bert_ckpt['optimizer'])
+
+    train_data = DataLoader(bert_vocab, args.train_data, args.batch_size, args.max_len)
     batch_acm = 0
     acc_acm, ntokens_acm, acc_nxt_acm, npairs_acm, loss_acm = 0., 0., 0., 0., 0.
     while True:
@@ -110,11 +119,12 @@ def run(args, local_rank):
             batch_acm += 1
             if batch_acm <= args.warmup_steps:
                 update_lr(optimizer, args.lr*batch_acm/args.warmup_steps)
-            truth = truth.cuda(local_rank)
-            inp = inp.cuda(local_rank)
-            seg = seg.cuda(local_rank)
-            msk = msk.cuda(local_rank)
-            nxt_snt_flag = nxt_snt_flag.cuda(local_rank)
+            if torch.cuda.is_available():
+                truth = truth.cuda(local_rank)
+                inp = inp.cuda(local_rank)
+                seg = seg.cuda(local_rank)
+                msk = msk.cuda(local_rank)
+                nxt_snt_flag = nxt_snt_flag.cuda(local_rank)
 
             optimizer.zero_grad()
             res, loss, acc, ntokens, acc_nxt, npairs = model(truth, inp, seg, msk, nxt_snt_flag)
@@ -151,8 +161,12 @@ if __name__ == "__main__":
     args = parse_config()
 
     if args.world_size == 1:
-        run(args, 0)
-        exit(0)
+        if torch.cuda.is_available():
+            run(args, 0)
+            exit(0)
+        else:
+            run(args, "cpu")
+            exit(0)
     processes = []
     for rank in range(args.gpus):
         p = mp.Process(target=init_processes, args=(args, rank, run, args.backend))

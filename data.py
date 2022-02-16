@@ -126,7 +126,7 @@ class Vocab(object):
                 if int(cnt) >= 2*min_occur_cnt:
                     idx2token.append(token)
             else:
-                if int(cnt) >= min_occur_cnt:
+                if int(cnt) >= 2*min_occur_cnt:  # should not * 2 in the later revisions
                     idx2token.append(token)
 
         self._token2idx = dict(zip(idx2token, range(len(idx2token))))
