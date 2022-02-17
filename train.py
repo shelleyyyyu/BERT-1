@@ -147,7 +147,7 @@ def run(args, local_rank):
             if (args.world_size==1 or dist.get_rank() ==0) and batch_acm%args.save_every == -1%args.save_every:
                 if not os.path.exists(args.save_dir):
                     os.mkdir(args.save_dir)
-                torch.save({'args':args, 'model':model.state_dict(), 'optimizer':optimizer.state_dict()}, '%s/epoch%d_batch_%d'%(args.save_dir, train_data.epoch_id, batch_acm))
+                torch.save({'args':args, 'model':model.state_dict(), 'optimizer':optimizer.state_dict()}, '%s/epoch%d_batch_%d'%(args.save_dir, train_data.epoch_id, batch_acm), _use_new_zipfile_serialization=False)
 
 def init_processes(args, local_rank, fn, backend='nccl'):
     """ Initialize the distributed environment. """
